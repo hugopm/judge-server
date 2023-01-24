@@ -2,7 +2,6 @@ import itertools
 import os
 import re
 import subprocess
-import zipfile
 from collections import defaultdict
 from functools import partial
 
@@ -15,6 +14,7 @@ from dmoj.config import ConfigNode, InvalidInitException
 from dmoj.judgeenv import env, get_problem_root
 from dmoj.utils.helper_files import compile_with_auxiliary_files, parse_helper_file_error
 from dmoj.utils.module import load_module_from_file
+from dmoj.problemdata import ProblemDataManager
 
 DEFAULT_TEST_CASE_INPUT_PATTERN = r'^(?=.*?\.in|in).*?(?:(?:^|\W)(?P<batch>\d+)[^\d\s]+)?(?P<case>\d+)[^\d\s]*$'
 DEFAULT_TEST_CASE_OUTPUT_PATTERN = r'^(?=.*?\.out|out).*?(?:(?:^|\W)(?P<batch>\d+)[^\d\s]+)?(?P<case>\d+)[^\d\s]*$'
@@ -37,7 +37,7 @@ class Problem:
 
         self.config = ProblemConfig(self.problem_data, meta)
 
-        self.problem_data.archive = self._resolve_archive_files()
+        self.problem_data.resolve_archive(self.config)
 
         if not self._resolve_test_cases():
             raise InvalidInitException('No test cases? What am I judging?')
@@ -157,40 +157,6 @@ class Problem:
             return graders.BridgedInteractiveGrader
         else:
             return graders.StandardGrader
-
-    def _resolve_archive_files(self):
-        if self.config.archive:
-            archive_path = os.path.join(self.root_dir, self.config.archive)
-            if not os.path.exists(archive_path):
-                raise InvalidInitException('archive file "%s" does not exist' % archive_path)
-            try:
-                archive = zipfile.ZipFile(archive_path, 'r')
-            except zipfile.BadZipfile:
-                raise InvalidInitException('bad archive: "%s"' % archive_path)
-            return archive
-        return None
-
-
-class ProblemDataManager(dict):
-    def __init__(self, problem_root_dir, **kwargs):
-        super().__init__(**kwargs)
-        self.problem_root_dir = problem_root_dir
-        self.archive = None
-
-    def __missing__(self, key):
-        try:
-            with open(os.path.join(self.problem_root_dir, key), 'rb') as f:
-                return f.read()
-        except IOError:
-            if self.archive:
-                zipinfo = self.archive.getinfo(key)
-                with self.archive.open(zipinfo) as f:
-                    return f.read()
-            raise KeyError('file "%s" could not be found in "%s"' % (key, self.problem_root_dir))
-
-    def __del__(self):
-        if self.archive:
-            self.archive.close()
 
 
 class ProblemConfig(ConfigNode):

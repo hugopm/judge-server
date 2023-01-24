@@ -11,6 +11,7 @@ import yaml
 from dmoj.config import ConfigNode
 from dmoj.utils import pyyaml_patch  # noqa: F401, imported for side effect
 from dmoj.utils.unicode import utf8text
+from dmoj.problemdata import ProblemLocation
 
 problem_dirs = ()
 problem_globs = ()
@@ -69,7 +70,7 @@ exclude_executors: Set[str] = set()
 
 
 def load_env(cli=False, testsuite=False):  # pragma: no cover
-    global problem_dirs, problem_globs, get_problem_roots, only_executors, exclude_executors, log_file, server_host, server_port, no_ansi, no_ansi_emu, skip_self_test, env, startup_warnings, no_watchdog, problem_regex, case_regex, api_listen, secure, no_cert_check, cert_store, problem_watches, cli_history_file, cli_command, log_level
+    global problem_dirs, problem_globs, only_executors, exclude_executors, log_file, server_host, server_port, no_ansi, no_ansi_emu, skip_self_test, env, startup_warnings, no_watchdog, problem_regex, case_regex, api_listen, secure, no_cert_check, cert_store, problem_watches, cli_history_file, cli_command, log_level
 
     if cli:
         description = 'Starts a shell for interfacing with a local judge instance.'
@@ -190,155 +191,15 @@ def load_env(cli=False, testsuite=False):  # pragma: no cover
     if getattr(args, 'judge_key', None):
         env['key'] = args.judge_key
 
-    if env.problem_storage_globs:
-        problem_globs = env.problem_storage_globs
-        # Populate cache and send warnings
-        get_problem_roots(warnings=True)
-
-        problem_watches = problem_globs
-
-    elif env.problem_storage_root:
-        startup_warnings.append('`problem_storage_root` is deprecated, use `problem_storage_globs` instead')
-        problem_dirs = env.problem_storage_root
-        # Populate cache and send warnings
-        get_problem_roots(warnings=True)
-
-        def get_path(x, y):
-            return utf8text(os.path.normpath(os.path.join(x, y)))
-
-        if isinstance(problem_dirs, str):
-            problem_dirs = [problem_dirs]
-
-        problem_watches = []
-        for dir in problem_dirs:
-            if isinstance(dir, ConfigNode):
-                for _, recursive_root in dir.iteritems():
-                    problem_watches.append(get_path(_root, recursive_root))
-            else:
-                problem_watches.append(get_path(_root, dir))
-
-    if problem_globs is None and problem_dirs is None:
-        if not testsuite:
-            raise SystemExit(f'`problem_storage_globs` not specified in "{model_file}"; no problems available to grade')
-
-    if testsuite:
-        if not os.path.isdir(args.tests_dir):
-            raise SystemExit('Invalid tests directory')
-        # TODO: replace problem and case regexes with globs
-        problem_globs = [os.path.join(args.tests_dir, '*')]
-        clear_problem_dirs_cache()
-
-        import re
-
-        if args.problem_regex:
-            try:
-                problem_regex = re.compile(args.problem_regex)
-            except re.error:
-                raise SystemExit('Invalid problem regex')
-        if args.case_regex:
-            try:
-                case_regex = re.compile(args.case_regex)
-            except re.error:
-                raise SystemExit('Invalid case regex')
-
-
-_problem_root_cache: Dict[str, str] = {}
-
 
 def get_problem_root(problem_id):
-    cached_root = _problem_root_cache.get(problem_id)
-    if cached_root is None or not os.path.isfile(os.path.join(cached_root, 'init.yml')):
-        for root_dir in get_problem_roots():
-            problem_root_dir = os.path.join(root_dir, problem_id)
-            problem_init = os.path.join(problem_root_dir, 'init.yml')
-            if os.path.isfile(problem_init):
-                _problem_root_cache[problem_id] = problem_root_dir
-                break
-
-    return _problem_root_cache[problem_id]
-
-
-_problem_dirs_cache = None
-
-
-def get_problem_roots(warnings=False):
-    global _problem_dirs_cache
-
-    if _problem_dirs_cache is not None:
-        return _problem_dirs_cache
-
-    if problem_globs:
-        dirs = set()
-        for dir_glob in problem_globs:
-            config_glob = os.path.join(dir_glob, 'init.yml')
-            dirs = dirs.union(
-                map(
-                    lambda x: os.path.split(os.path.dirname(x))[0],
-                    glob.iglob(config_glob, recursive=True),
-                )
-            )
-        dirs = list(dirs)
-    else:
-
-        def get_path(x, y):
-            return utf8text(os.path.normpath(os.path.join(x, y)))
-
-        if isinstance(problem_dirs, list):
-            _problem_dirs_cache = problem_dirs
-            return problem_dirs
-        elif isinstance(problem_dirs, ConfigNode):
-
-            def find_directories_by_depth(dir, depth):
-                if depth < 0:
-                    raise ValueError('negative depth reached')
-                if not depth:
-                    if os.path.isdir(dir):
-                        return [dir]
-                    else:
-                        return []
-                ret = []
-                for child in os.listdir(dir):
-                    next = os.path.join(dir, child)
-                    if os.path.isdir(next):
-                        ret += find_directories_by_depth(next, depth - 1)
-                return ret
-
-            dirs = []
-            for dir in problem_dirs:
-                if isinstance(dir, ConfigNode):
-                    for depth, recursive_root in dir.iteritems():
-                        try:
-                            dirs += find_directories_by_depth(get_path(_root, recursive_root), int(depth))
-                        except ValueError:
-                            startup_warnings.append('illegal depth argument %s' % depth)
-                else:
-                    dirs.append(get_path(_root, dir))
-        else:
-            dirs = os.path.join(_root, problem_dirs)
-            dirs = [get_path(dirs, dir) for dir in os.listdir(dirs)]
-            dirs = [dir for dir in dirs if os.path.isdir(dir)]
-
-    if warnings:
-        cleaned_dirs = []
-        for dir in dirs:
-            if not os.path.isdir(dir):
-                startup_warnings.append('cannot access problem directory %s (does it exist?)' % dir)
-                continue
-            cleaned_dirs.append(dir)
-    else:
-        cleaned_dirs = dirs
-    _problem_dirs_cache = cleaned_dirs
-    return cleaned_dirs
-
-
-def clear_problem_dirs_cache():
-    global _problem_dirs_cache
-    _problem_dirs_cache = None
-
+    ret = ProblemLocation()
+    ret.bucket = "dmojproblems"
+    ret.root_dir = problem_id + "/"
+    return ret
 
 def get_problem_watches():
     return problem_watches
-
 
 def get_supported_problems_and_mtimes():
     """
@@ -346,14 +207,7 @@ def get_supported_problems_and_mtimes():
     :return:
         A list of all problems in tuple format: (problem id, mtime)
     """
-    problems = []
-    for dir in get_problem_roots():
-        if not os.path.isdir(dir):  # we do this check in case a problem root was deleted but persists in cache
-            continue
-        for problem in os.listdir(dir):
-            problem = utf8text(problem)
-            if os.access(os.path.join(dir, problem, 'init.yml'), os.R_OK):
-                problems.append((problem, os.path.getmtime(os.path.join(dir, problem))))
+    problems = [("aplusb", 1674476466), ("quilles", 1674476466)]
     return problems
 
 
